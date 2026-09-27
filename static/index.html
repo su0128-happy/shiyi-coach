@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>视译练习助手</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div class="brand"><h1>视译练习助手</h1><div class="byline"><img class="author-avatar" src="/static/author-avatar.jpg" alt="阿雏苏苏子Liora 作者头像" /><span>来自阿雏苏苏子Liora</span></div></div>
+      <nav class="nav" aria-label="主导航">
+        <button data-view="home" class="active">首页</button><button data-view="practice">开始练习</button><button data-view="magazine">刊物文章</button><button data-view="profile">练习记录</button><button data-view="summary">专业复盘</button><button data-view="favorites">收藏与笔记</button>
+      </nav>
+    </header>
+    <main>
+      <section id="view-home" class="view">
+        <div class="home-intro"><p class="kicker">今日练习空间</p><h2>把每一次高效练习，沉淀成清晰进步</h2><p class="lead">专注原句、表达和复盘，让训练过程可回看、可修正、可持续。</p></div>
+        <div class="entry-grid">
+          <button class="entry-card" data-go-view="practice"><span class="entry-index">01</span><span class="entry-title">开始练习</span><span class="entry-copy">系统生成或使用自己的材料，完成一组五题视译练习。</span><span class="entry-arrow">→</span></button>
+          <button class="entry-card" data-go-view="profile"><span class="entry-index">02</span><span class="entry-title">练习记录</span><span class="entry-copy">查看历次作答、点评和得分，回到需要修正的地方。</span><span class="entry-arrow">→</span></button>
+          <button class="entry-card" data-go-view="summary"><span class="entry-index">03</span><span class="entry-title">专业复盘</span><span class="entry-copy">从多次练习中识别薄弱点，形成下一阶段训练方向。</span><span class="entry-arrow">→</span></button>
+        </div>
+      </section>
+
+      <section id="view-magazine" class="view hidden"><div class="section-heading"><div><p class="kicker">英语刊物文章</p><h2>刊物文章练习</h2></div><span class="section-status">文章、题目与去重报告</span></div><div class="card magazine-setup"><div class="grid2"><label>主题<select id="magazine-topic"><option value="AUTO">随机主题</option><option>科技</option><option>教育</option><option>环保</option><option>医疗</option><option>经济</option><option>文化</option><option>社会</option><option>历史</option></select></label><label>难度<select id="magazine-level"><option>入门</option><option selected>中级</option><option>高级</option></select></label></div><label>刊物风格<select id="magazine-style"><option>The Economist 式分析</option><option>The Atlantic 式长评</option><option>National Geographic 式纪实</option><option>Wired 式科技评论</option><option>New Yorker 式人物特写</option></select></label><div class="actions"><button class="primary" id="btn-magazine-generate">生成刊物文章与题目</button></div><p class="status" id="magazine-status"></p></div><div id="magazine-result" class="card hidden"></div></section>
+
+        <div class="section-heading"><div><p class="kicker">练习</p><h2>开始练习</h2></div><span class="section-status">每组 5 题</span></div>
+        <div class="card setup" id="practice-setup">
+          <p class="kicker" id="date-line">今天</p><h3>选择出题方式</h3><p class="lead">看一题，答一题；可随时回看并修改。全部完成后统一点评。</p>
+          <div class="mode-pick" role="group" aria-label="出题方式"><button class="mode-btn on" data-mode="system">系统生成题目<span>即时生成一组 5 题</span></button><button class="mode-btn" data-mode="custom">粘贴题目<span>将你的材料拆成 5 题</span></button></div>
+          <p class="field-label">方向</p><div class="dir-pick"><button type="button" class="dir-btn" data-dir="EN-ZH">英译中<span>看英文，说中文</span></button><button type="button" class="dir-btn" data-dir="ZH-EN">中译英<span>看中文，说英文</span></button></div>
+          <div class="grid2"><label>主题<select id="topic"><option value="AUTO">随机热点</option><option value="POL">POL 政治外交</option><option value="ECO">ECO 经济金融</option><option value="TECH">TECH 科技</option><option value="SOC">SOC 社会</option><option value="ENV">ENV 环境</option><option value="EDU">EDU 教育健康</option><option value="BIZ">BIZ 商业</option><option value="CUL">CUL 文体</option></select></label><label>难度<select id="level"><option value="C1">C1 进阶</option><option value="B2">B2 基础</option></select></label></div>
+          <label class="block hidden" id="custom-wrap">粘贴原文或 5 条题目<textarea id="custom" rows="7" placeholder="可粘贴多段内容或多句话。系统会优先按句拆分；不足 5 题时会循环生成练习位。"></textarea><span class="upload-line">或上传 .txt / .md 文件<input id="custom-file" type="file" accept=".txt,.md,text/plain,text/markdown" /></span></label>
+          <div class="actions"><button class="primary" id="btn-practice-start">开始练习</button></div><p class="status" id="practice-status"></p>
+        </div>
+
+        <div class="hidden" id="practice-workspace">
+          <div class="practice-progress"><div><span id="practice-count">第 1 / 5 题</span><strong id="practice-source-label"></strong></div><div class="progress-track"><span id="progress-bar"></span></div></div>
+          <div class="question-jump" id="question-jump" aria-label="题目导航"></div>
+          <div class="card question-card"><p class="kicker">原句 · 作答过程中持续可见</p><article class="question-source" id="question-source"></article><div class="term-preview" id="term-preview"></div><label class="block">我的作答<textarea id="question-answer" rows="7" placeholder="点击“开始语音作答”后，可直接口述；转写结果会自动填入此处，也可手动修改。"></textarea><span class="answer-counter" id="answer-counter">0 字</span></label><div class="voice-panel"><div><b>语音作答</b><span id="voice-timer">00:00</span></div><div class="voice-actions"><button class="voice-start" id="btn-voice-start">开始语音作答</button><button class="ghost" id="btn-voice-stop" disabled>停止并转写</button></div><p id="voice-status">正在检查语音转写状态……</p></div><div class="manual-marks"><label>语气（手动标记）<select id="question-tone"><option>待标记</option><option>自然专业</option><option>平稳</option><option>偏生硬</option></select></label><label>停顿 / 节奏（手动标记）<select id="question-rhythm"><option>待标记</option><option>节奏自然</option><option>偶有停顿</option><option>停顿偏多</option></select></label></div><p class="field-tip">可手动标记本题的语气与停顿/节奏。</p><div class="actions split-actions"><button class="ghost" id="btn-prev">上一题</button><button class="ghost" id="btn-next">下一题</button><button class="primary" id="btn-review">完成 5 题，统一点评</button></div><p class="status" id="answer-status"></p></div>
+        </div>
+
+        <div class="card hidden" id="practice-result"><div class="result-top"><div><p class="kicker">逐句点评</p><h3>当前句完整分析</h3></div><div class="overall-score"><strong id="overall-score">--</strong><span id="overall-label">--</span></div></div><div class="sentence-review-progress"><span id="review-sentence-count">第 1 / 5 句</span><div class="progress-track"><span id="review-progress-bar"></span></div></div><p class="review-scroll-tip">当前句分析较长时，请在下方内容区域内滚动查看；完整查看后再点击“下一句”。</p><div id="review-list" class="review-list"></div><div class="actions split-actions"><button class="ghost" id="btn-review-prev" disabled>上一句</button><button class="primary" id="btn-review-next">下一句</button></div><div class="actions"><button class="primary" id="btn-save-practice">保存到练习记录</button><button class="ghost hidden" id="btn-go-records" data-go-view="profile">查看练习记录</button><button class="ghost" id="btn-edit-practice">返回修改</button><button class="ghost" id="btn-practice-again">再开始一组练习</button></div><p class="status" id="save-status"></p></div>
+      </section>
+
+      <section id="view-profile" class="view hidden"><div class="section-heading"><div><p class="kicker">练习档案</p><h2>练习记录</h2></div><span class="section-status">保留题目、做题记录与批改</span></div><div class="record-actions"><button class="ghost" data-export-kind="records" data-export-format="docx">导出 Word</button><button class="ghost" data-export-kind="records" data-export-format="pdf">导出 PDF</button><button class="ghost" id="btn-clear-records">清空记录</button></div><div id="records-list" class="records-list"></div><div id="records-empty" class="card empty-state"><span class="empty-icon">◷</span><h3>暂时没有练习记录</h3><p>完成五题作答与统一批改后，点击保存记录即可在这里查看。</p><button class="primary" data-go-view="practice">开始练习</button></div><div id="record-detail" class="card hidden"></div></section>
+      <section id="view-summary" class="view hidden"><div class="section-heading"><div><p class="kicker">专业复盘</p><h2>专业复盘</h2></div><span class="section-status">基于最近练习</span></div><div class="card"><div class="review-placeholder"><span class="review-mark">3</span><div><h3>选择最近 3–20 次练习进行复盘</h3><p>完成至少 3 次练习后，可选择纳入复盘的最近练习次数。</p></div></div><label class="block review-count">复盘范围<select id="review-count"><option value="3">最近 3 次练习</option><option value="5">最近 5 次练习</option><option value="10">最近 10 次练习</option><option value="15">最近 15 次练习</option><option value="20">最近 20 次练习</option></select></label><div class="actions"><button class="primary" id="btn-generate-review">生成专业复盘</button><button class="ghost" id="btn-save-professional-review" disabled>保存本次复盘</button><button class="ghost" data-export-kind="reviews" data-export-format="docx">导出 Word</button><button class="ghost" data-export-kind="reviews" data-export-format="pdf">导出 PDF</button></div><p class="status" id="professional-review-status"></p><div id="professional-review-result"></div><div class="review-history"><h3>历史复盘</h3><div id="review-history-list"></div></div></div></section>
+      <section id="view-favorites" class="view hidden"><div class="section-heading"><div><p class="kicker">收藏笔记</p><h2>收藏与笔记</h2></div><span class="section-status">题目与批改</span></div><div class="record-actions"><button class="ghost" data-export-kind="favorites" data-export-format="docx">导出 Word</button><button class="ghost" data-export-kind="favorites" data-export-format="pdf">导出 PDF</button></div><div id="favorites-list" class="records-list"></div><div id="favorites-empty" class="card empty-state"><span class="empty-icon">☆</span><h3>还没有收藏内容</h3><p>在练习记录详情中收藏题目，并为它添加笔记。</p></div></section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
