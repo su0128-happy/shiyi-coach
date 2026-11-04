@@ -181,7 +181,6 @@ function showView(name) {
   });
   if (name === "profile") loadRecords();
   if (name === "favorites") loadFavorites();
-  if (name === "magazine") loadMagazineHistory();
 
 }
 
@@ -241,8 +240,6 @@ function renderQuestion() {
   $("practice-source-label").textContent = `${directionLabel(state.practice.direction)} · ${state.practice.source}`;
   $("progress-bar").style.width = `${((state.currentIndex + 1) / 5) * 100}%`;
   $("question-source").textContent = question.source;
-  const terms = (question.term_hints || []).map((term) => `<div class="term-preview-item"><b>原文术语：${escapeHtml(term.source)}</b><span>推荐译法：${escapeHtml(term.suggestion)}</span><small>当前译法：${escapeHtml(term.current || "未作答")} · ${escapeHtml(term.reason)}</small></div>`).join("");
-  $("term-preview").innerHTML = terms ? `<div class="term-preview-heading">本句术语预习（中英对照）</div>${terms}` : "";
   $("question-answer").value = question.answer || "";
   $("answer-counter").textContent = `${question.answer?.length || 0} ${state.practice.direction === "EN-ZH" ? "字" : "字符/词"}`;
   $("question-tone").value = question.tone || "待标记";
@@ -352,7 +349,6 @@ function renderSentenceFeedback() {
   const item = state.review.questions[state.reviewIndex || 0];
   const feedback = item.feedback;
   const scoreRows = Object.entries(feedback.manual_mark?.scores || {}).map(([key, value]) => `<label class="score-edit"><span>${({ grammar_accuracy: "语法准确性", word_precision: "用词精准度", sentence_variety: "句式多样性", logic_coherence: "逻辑连贯度", spoken_naturalness: "口语自然度" }[key] || key)}</span><input type="number" min="0" max="100" value="${value.score}" data-score-key="${key}"><small>${escapeHtml(value.deduction)}</small></label>`).join("");
-  const terms = (feedback.wording?.terms || []).map((term) => `<div class="term-item"><b>专有名词/术语</b><span>${escapeHtml(term.source)}</span><b>当前译法</b><span>${escapeHtml(term.current || "未译出")}</span><b>推荐译法</b><span>${escapeHtml(term.suggestion)}</span><small>${escapeHtml(term.reason)}</small></div>`).join("") || "<p>本句未识别到需要单独标注的专名或术语。</p>";
   const advice = (label, value) => `<div class="advice-row"><b>${label}</b><p>${escapeHtml(value || "暂无")}</p></div>`;
   const breakdown = feedback.breakdown || {};
   const example = feedback.example || {};
@@ -361,7 +357,7 @@ function renderSentenceFeedback() {
   $("review-progress-bar").style.width = `${(((state.reviewIndex || 0) + 1) / state.review.questions.length) * 100}%`;
   $("overall-score").textContent = feedback.score;
   $("overall-label").textContent = feedback.label;
-  $("review-list").innerHTML = `<article class="review-item sentence-review-card"><h4>${escapeHtml(feedback.source_quote)}</h4><div class="full-analysis"><div class="analysis-block"><b>断句划分</b><p>切分前：${escapeHtml(breakdown.before || "")}</p><p>切分后：${escapeHtml(breakdown.after || "")}</p></div><div class="analysis-block"><b>问题证据与信息结构</b><p>${escapeHtml(feedback.structure?.evidence || "")}</p><p>${escapeHtml(feedback.structure?.main_clause || "")}</p><p>${escapeHtml(feedback.structure?.supporting_information || "")}</p></div><div class="analysis-block"><b>问题诊断</b><p>${escapeHtml(feedback.diagnosis)}</p></div><div class="analysis-block"><b>修改示例</b><p>原句：${escapeHtml(example.original || "")}</p><p>改后句：${escapeHtml(example.revised || "")}</p><p>改动点：${escapeHtml(example.changes || "")}</p></div><div class="analysis-block"><b>原因说明</b><p>${escapeHtml(feedback.reason)}</p></div><div class="analysis-block"><b>详细讲解与复述步骤</b><ol class="teaching-steps">${teaching || "<li>暂无详细讲解。</li>"}</ol></div><div class="analysis-block"><b>手动标记与动态评分</b><p>语气：${escapeHtml(feedback.manual_mark?.tone || "待标记")}　停顿：${escapeHtml(feedback.manual_mark?.rhythm || "待标记")}</p><div class="label-edit"><label>语气<select data-manual-tone><option ${feedback.manual_mark?.tone === "自然专业" ? "selected" : ""}>自然专业</option><option ${feedback.manual_mark?.tone === "平稳" ? "selected" : ""}>平稳</option><option ${feedback.manual_mark?.tone === "偏生硬" ? "selected" : ""}>偏生硬</option><option ${feedback.manual_mark?.tone === "待标记" ? "selected" : ""}>待标记</option></select></label><label>节奏<select data-manual-rhythm><option ${feedback.manual_mark?.rhythm === "节奏自然" ? "selected" : ""}>节奏自然</option><option ${feedback.manual_mark?.rhythm === "偶有停顿" ? "selected" : ""}>偶有停顿</option><option ${feedback.manual_mark?.rhythm === "停顿偏多" ? "selected" : ""}>停顿偏多</option><option ${feedback.manual_mark?.rhythm === "待标记" ? "selected" : ""}>待标记</option></select></label></div><div class="score-edit-grid">${scoreRows}</div></div><div class="analysis-block"><b>停顿节奏</b><p>${escapeHtml(feedback.pause_rhythm)}</p></div><div class="analysis-block"><b>用词句式</b><p>评分：${feedback.wording?.score ?? "--"}；具体问题：${escapeHtml(feedback.wording?.issue || "暂无")}</p><p>句式：${escapeHtml(feedback.wording?.sentence_note || "暂无")}</p><div class="term-list">${terms}</div></div></div><button class="ghost favorite-button" data-favorite-current="${item.id}">收藏本句作答</button></article>`;
+  $("review-list").innerHTML = `<article class="review-item sentence-review-card"><h4>${escapeHtml(feedback.source_quote)}</h4><div class="full-analysis"><div class="analysis-block"><b>断句划分</b><p>切分前：${escapeHtml(breakdown.before || "")}</p><p>切分后：${escapeHtml(breakdown.after || "")}</p></div><div class="analysis-block"><b>问题证据与信息结构</b><p>${escapeHtml(feedback.structure?.evidence || "")}</p><p>${escapeHtml(feedback.structure?.main_clause || "")}</p><p>${escapeHtml(feedback.structure?.supporting_information || "")}</p></div><div class="analysis-block"><b>问题诊断</b><p>${escapeHtml(feedback.diagnosis)}</p></div><div class="analysis-block"><b>修改示例</b><p>原句：${escapeHtml(example.original || "")}</p><p>改后句：${escapeHtml(example.revised || "")}</p><p>改动点：${escapeHtml(example.changes || "")}</p></div><div class="analysis-block"><b>原因说明</b><p>${escapeHtml(feedback.reason)}</p></div><div class="analysis-block"><b>详细讲解与复述步骤</b><ol class="teaching-steps">${teaching || "<li>暂无详细讲解。</li>"}</ol></div><div class="analysis-block"><b>手动标记与动态评分</b><p>语气：${escapeHtml(feedback.manual_mark?.tone || "待标记")}　停顿：${escapeHtml(feedback.manual_mark?.rhythm || "待标记")}</p><div class="label-edit"><label>语气<select data-manual-tone><option ${feedback.manual_mark?.tone === "自然专业" ? "selected" : ""}>自然专业</option><option ${feedback.manual_mark?.tone === "平稳" ? "selected" : ""}>平稳</option><option ${feedback.manual_mark?.tone === "偏生硬" ? "selected" : ""}>偏生硬</option><option ${feedback.manual_mark?.tone === "待标记" ? "selected" : ""}>待标记</option></select></label><label>节奏<select data-manual-rhythm><option ${feedback.manual_mark?.rhythm === "节奏自然" ? "selected" : ""}>节奏自然</option><option ${feedback.manual_mark?.rhythm === "偶有停顿" ? "selected" : ""}>偶有停顿</option><option ${feedback.manual_mark?.rhythm === "停顿偏多" ? "selected" : ""}>停顿偏多</option><option ${feedback.manual_mark?.rhythm === "待标记" ? "selected" : ""}>待标记</option></select></label></div><div class="score-edit-grid">${scoreRows}</div></div><div class="analysis-block"><b>停顿节奏</b><p>${escapeHtml(feedback.pause_rhythm)}</p></div><div class="analysis-block"><b>用词句式</b><p>评分：${feedback.wording?.score ?? "--"}；具体问题：${escapeHtml(feedback.wording?.issue || "暂无")}</p><p>句式：${escapeHtml(feedback.wording?.sentence_note || "暂无")}</p></div></div><button class="ghost favorite-button" data-favorite-current="${item.id}">收藏本句作答</button></article>`;
   state.reviewViewed.add(state.reviewIndex || 0);
   $("btn-review-prev").disabled = (state.reviewIndex || 0) === 0;
   $("btn-save-practice").disabled = state.reviewViewed.size < state.review.questions.length;
@@ -393,7 +389,7 @@ $("btn-review").addEventListener("click", async () => {
     $("answer-status").textContent = "还有题目未作答，请完成 5 题后再统一点评。你可以点击上方题号定位。";
     return;
   }
-  $("answer-status").textContent = "正在统一点评…";
+  $("answer-status").textContent = "AI 正在逐句点评，请稍候（约需数十秒）…";
   $("btn-review").disabled = true;
   try {
     const data = await api("/api/practice/review", {
@@ -467,8 +463,7 @@ function fullAnalysisRows(feedback) {
   const example = item.example || {};
   const breakdown = item.breakdown || {};
   const teaching = (item.teaching || []).map((step, index) => `<li><b>${index + 1}. ${escapeHtml(step.title)}</b><p>${escapeHtml(step.content)}</p></li>`).join("");
-  const terms = (item.wording?.terms || []).map((term) => `<div class="term-item"><b>术语</b><span>${escapeHtml(term.source)}</span><b>当前译法</b><span>${escapeHtml(term.current || "未译出")}</span><b>推荐译法</b><span>${escapeHtml(term.suggestion)}</span><small>${escapeHtml(term.reason)}</small></div>`).join("");
-  return `<section class="suggestion full-record-analysis"><div class="advice-row"><b>原文定位</b><p>${escapeHtml(item.source_quote || "暂无")}</p></div><div class="advice-row"><b>断句划分</b><p>切分前：${escapeHtml(breakdown.before || "")}\n切分后：${escapeHtml(breakdown.after || "")}</p></div><div class="advice-row"><b>问题诊断</b><p>${escapeHtml(item.diagnosis || "暂无")}</p></div><div class="advice-row"><b>修改示例</b><p>原句：${escapeHtml(example.original || "")}\n改后句：${escapeHtml(example.revised || "")}\n改动点：${escapeHtml(example.changes || "")}</p></div><div class="advice-row"><b>原因说明</b><p>${escapeHtml(item.reason || "暂无")}</p></div>${teaching ? `<div class="analysis-block"><b>详细讲解</b><ol class="teaching-steps">${teaching}</ol></div>` : ""}${terms ? `<div class="analysis-block"><b>术语与译法</b><div class="term-list">${terms}</div></div>` : ""}</section>`;
+  return `<section class="suggestion full-record-analysis"><div class="advice-row"><b>原文定位</b><p>${escapeHtml(item.source_quote || "暂无")}</p></div><div class="advice-row"><b>断句划分</b><p>切分前：${escapeHtml(breakdown.before || "")}\n切分后：${escapeHtml(breakdown.after || "")}</p></div><div class="advice-row"><b>问题诊断</b><p>${escapeHtml(item.diagnosis || "暂无")}</p></div><div class="advice-row"><b>修改示例</b><p>原句：${escapeHtml(example.original || "")}\n改后句：${escapeHtml(example.revised || "")}\n改动点：${escapeHtml(example.changes || "")}</p></div><div class="advice-row"><b>原因说明</b><p>${escapeHtml(item.reason || "暂无")}</p></div>${teaching ? `<div class="analysis-block"><b>详细讲解</b><ol class="teaching-steps">${teaching}</ol></div>` : ""}</section>`;
 }
 
 function renderRecordDetail(record) {
@@ -487,22 +482,6 @@ function renderRecordDetail(record) {
   }));
   $("record-detail").scrollIntoView({ behavior: "smooth", block: "start" });
 }
-
-function renderMagazine(article) {
-  const elements = Object.entries(article.elements || {}).map(([key, value]) => `<div class="magazine-element"><b>${escapeHtml(key)}</b><span>${escapeHtml(Array.isArray(value) ? value.join("、") : value)}</span></div>`).join("");
-  const questions = (article.questions || []).map((question, index) => `<article class="magazine-question"><h4>${index + 1}. ${escapeHtml(question.type || "理解题")} · ${escapeHtml(question.difficulty || article.level || "中级")}</h4><p><b>题目</b>${escapeHtml(question.prompt || "")}</p><p><b>对应段落</b>${escapeHtml(String(question.paragraph || ""))}</p><details><summary>参考答案与评分要点</summary><p>${escapeHtml(question.answer || "")}</p><p>${escapeHtml(Array.isArray(question.scoring_points) ? question.scoring_points.join("；") : question.scoring_points || "")}</p><p>${escapeHtml(question.explanation || "")}</p></details></article>`).join("");
-  $("magazine-result").innerHTML = `<div class="magazine-heading"><p class="kicker">${escapeHtml(article.elements?.["刊物风格"] || article.style || "英语刊物")}</p><h3>${escapeHtml(article.title)}</h3><p class="magazine-standfirst">${escapeHtml(article.standfirst)}</p><p class="meta-row">${article.word_count || 0} 词 · 建议阅读 ${escapeHtml(String(article.reading_time || ""))}</p></div><div class="magazine-body">${(article.body || []).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}</div><p class="magazine-kicker">${escapeHtml(article.kicker)}</p><h4>本文元素拆解</h4><div class="magazine-elements">${elements}</div><h4>配套题目（${(article.questions || []).length}）</h4><div class="magazine-questions">${questions}</div><details class="magazine-check"><summary>查看去重自检报告</summary><pre>${escapeHtml(JSON.stringify(article.self_check || {}, null, 2))}</pre></details>`;
-  $("magazine-result").classList.remove("hidden");
-}
-
-async function loadMagazineHistory() {
-  try { const data = await api("/api/magazine/history"); $("magazine-status").textContent = data.articles?.length ? `历史文章 ${data.articles.length} 篇` : "尚无历史文章"; } catch (error) { $("magazine-status").textContent = error.message; }
-}
-
-$("btn-magazine-generate").addEventListener("click", async () => {
-  $("btn-magazine-generate").disabled = true; $("magazine-status").textContent = "正在生成刊物文章、配套题目并执行去重检查……";
-  try { const article = await api("/api/magazine/generate", { direction: state.direction, topic: $("magazine-topic").value, level: $("magazine-level").value, style: $("magazine-style").value }); renderMagazine(article); $("magazine-status").textContent = `生成完成，已通过 ${article.self_check?.attempts || 1} 次校验。`; } catch (error) { $("magazine-status").textContent = error.message; } finally { $("btn-magazine-generate").disabled = false; }
-});
 
 async function loadRecords() {
   try {
@@ -573,7 +552,7 @@ function renderProfessionalReview(data) {
 }
 
 $("btn-generate-review").addEventListener("click", async () => {
-  $("professional-review-status").textContent = "正在基于最近练习生成复盘…";
+  $("professional-review-status").textContent = "AI 正在生成专业复盘，请稍候…";
   try {
     const data = await api("/api/practice/professional-review", { count: Number($("review-count").value) });
     latestProfessionalReview = data;

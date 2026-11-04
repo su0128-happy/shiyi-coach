@@ -25,15 +25,12 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
-PROFILE = DATA / "profile.md"
 REPORTS = DATA / "reports"
 EXPORTS = DATA / "exports"
 PRACTICE_STORE = DATA / "practice_store.json"
-MAGAZINE_ARTICLE_STORE = DATA / "magazine_articles.json"
-MAGAZINE_QUESTION_STORE = DATA / "magazine_questions.json"
 REVIEW_STORE = DATA / "professional_reviews.json"
 RECENT_QUESTION_STORE = DATA / "recent_questions.json"
-MATERIALS = DATA / "materials"
+FAVORITE_STORE = DATA / "favorites.json"
 STATIC = ROOT / "static"
 PROMPT = (ROOT / "coach_prompt.md").read_text(encoding="utf-8")
 
@@ -81,34 +78,6 @@ app = FastAPI(title="视译训练教练")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
-class StartRequest(BaseModel):
-    direction: str = "auto"  # auto | EN-ZH | ZH-EN
-    topic: str = "AUTO"
-    level: str = "C1"  # B2 | C1
-    custom_text: str = ""
-    exclude: list[str] = Field(default_factory=list)
-
-
-class ScoreRequest(BaseModel):
-    direction: str
-    topic: str
-    level: str
-    source_title: str
-    source_outlet: str
-    source_date: str
-    source_url: str
-    source_note: str
-    paragraphs: list[str]
-    transcript: str
-    duration_sec: int
-    fluency_estimated: bool = False
-
-
-class SummaryRequest(BaseModel):
-    days: int = 7
-    save: bool = False
-
-
 class PracticeStartRequest(BaseModel):
     direction: str = "auto"
     topic: str = "AUTO"
@@ -130,18 +99,6 @@ class PracticeSaveRequest(BaseModel):
     source: str = ""
     questions: list[dict[str, Any]] = Field(default_factory=list)
     review: dict[str, Any] = Field(default_factory=dict)
-
-
-class MagazineGenerateRequest(BaseModel):
-    direction: str = "EN-ZH"
-    topic: str = "AUTO"
-    level: str = "中级"
-    style: str = "The Economist 式分析"
-
-
-class MagazineQuestionRequest(BaseModel):
-    article_id: str
-    questions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProfessionalReviewRequest(BaseModel):
@@ -168,7 +125,7 @@ async def transcribe_audio(audio: bytes, content_type: str, direction: str) -> d
         "model": DASHSCOPE_ASR_MODEL,
         "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": f"data:{mime_type};base64,{encoded}"}}]}],
         "stream": False,
-        "asr_options": {"language": "zh" if direction == "EN-ZH" else "en", "enable_itn": False},
+        "asr_options": {"language": "en" if direction == "EN-ZH" else "zh", "enable_itn": False},
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=15.0)) as client:
@@ -200,7 +157,7 @@ async def transcribe_audio(audio: bytes, content_type: str, direction: str) -> d
             text = str(content).strip()
         if not text:
             raise HTTPException(502, "阿里语音识别未返回转写文本。")
-        return {"transcript": text}
+        return {"transcript": text, "provider": "阿里百炼语音识别", "model": DASHSCOPE_ASR_MODEL}
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"阿里语音识别网络错误：{exc}") from exc
 
@@ -219,76 +176,6 @@ def count_en_words(text: str) -> int:
 
 def count_zh_chars(text: str) -> int:
     return len(re.findall(r"[\u4e00-\u9fff]", text))
-
-
-def split_paragraphs(text: str) -> list[str]:
-    parts = [p.strip() for p in re.split(r"\n\s*\n+", text.strip()) if p.strip()]
-    if len(parts) == 1:
-        parts = [p.strip() for p in text.strip().split("\n") if p.strip()]
-    return parts or [text.strip()]
-
-
-def prereread_seconds(direction: str, text: str) -> int:
-    if direction == "EN-ZH":
-        raw = count_en_words(text) * 0.25
-    else:
-        raw = count_zh_chars(text) * 0.15
-    return int(max(30, min(180, round(raw))))
-
-
-def record_window(direction: str, source: str) -> tuple[int, int, int]:
-    if direction == "EN-ZH":
-        # Chinese output ~ 0.9 of English words as 字 estimate is rough; use 160-200 字/min
-        est_out = int(count_en_words(source) * 1.6)
-        lo = max(40, round(est_out / 200 * 60))
-        hi = max(lo + 15, round(est_out / 160 * 60))
-    else:
-        est_out = int(count_zh_chars(source) * 0.7)
-        lo = max(40, round(est_out / 150 * 60))
-        hi = max(lo + 15, round(est_out / 130 * 60))
-    cap = int(hi * 1.5)
-    return lo, hi, cap
-
-
-def objective_metrics(direction: str, transcript: str, duration_sec: int) -> dict[str, Any]:
-    duration_sec = max(1, duration_sec)
-    if direction == "EN-ZH":
-        unit = "字"
-        n = count_zh_chars(transcript)
-        fillers = len(FILLER_ZH.findall(transcript))
-        repairs = len(REPAIR_ZH.findall(transcript))
-    else:
-        unit = "词"
-        n = count_en_words(transcript)
-        fillers = len(FILLER_EN.findall(transcript))
-        repairs = len(REPAIR_EN.findall(transcript))
-    speed = round(n / duration_sec * 60, 1)
-    per_hundred = round(fillers / max(n, 1) * 100, 2)
-    if repairs >= 6 or per_hundred >= 4:
-        evs = "过长"
-    elif repairs <= 1 and per_hundred <= 1.2 and duration_sec < 45 and n > 80:
-        evs = "过短"
-    else:
-        evs = "健康"
-    return {
-        "output_count": n,
-        "unit": unit,
-        "duration_sec": duration_sec,
-        "speed": speed,
-        "filler_density": per_hundred,
-        "self_repair_count": repairs,
-        "evs": evs,
-    }
-
-
-def grade_for(total: int) -> str:
-    if total >= 21:
-        return "优秀"
-    if total >= 16:
-        return "良好"
-    if total >= 10:
-        return "合格"
-    return "待提高"
 
 
 async def chat(messages: list[dict[str, str]], temperature: float = 0.4) -> str:
@@ -322,226 +209,6 @@ def parse_json(text: str) -> dict[str, Any]:
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.S)
     return json.loads(text)
 
-
-async def harvest_headlines(direction: str, topic: str) -> list[dict[str, str]]:
-    feeds = EN_FEEDS if direction == "EN-ZH" else ZH_FEEDS
-    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-
-    async def fetch_feed(client: httpx.AsyncClient, outlet: str, url: str) -> list[dict[str, str]]:
-        try:
-            response = await client.get(url, headers={"User-Agent": "shiyi-coach/1.0"})
-            parsed = feedparser.parse(response.content)
-        except Exception:
-            return []
-        entries: list[dict[str, str]] = []
-        for entry in parsed.entries[:12]:
-            published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc) if getattr(entry, "published_parsed", None) else None
-            if published and published < cutoff:
-                continue
-            title = (entry.get("title") or "").strip()
-            if not title:
-                continue
-            entries.append({
-                "outlet": outlet,
-                "title": title,
-                "summary": re.sub(r"<[^>]+>", "", entry.get("summary") or entry.get("description") or "")[:600],
-                "url": entry.get("link") or "",
-                "date": published.date().isoformat() if published else "",
-            })
-        return entries
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0), follow_redirects=True) as client:
-        groups = await asyncio.gather(*(fetch_feed(client, outlet, url) for outlet, url in feeds))
-    items = [item for group in groups for item in group]
-    topic_hint = TOPICS.get(topic, "")
-    if topic not in ("AUTO", "") and topic_hint:
-        ranked = [x for x in items if topic_hint[:2] in x["title"] or any(
-            k in x["title"] + x["summary"]
-            for k in {
-                "POL": ["选举", "外交", "总统", "election", "diplomat", "president", "NATO", "UN"],
-                "ECO": ["经济", "通胀", "利率", "GDP", "inflation", "rate", "market", "bank"],
-                "TECH": ["科技", "芯片", "AI", "人工智能", "chip", "tech", "software"],
-                "SOC": ["社会", "移民", "住房", "housing", "migration", "strike"],
-                "ENV": ["气候", "碳", "气候", "climate", "carbon", "flood"],
-                "EDU": ["教育", "卫生", "医院", "school", "health", "hospital"],
-                "BIZ": ["公司", "并购", "财报", "company", "merger", "earnings"],
-                "CUL": ["体育", "电影", "文化", "sport", "film", "olympic"],
-            }.get(topic, [])
-        )]
-        if ranked:
-            items = ranked + [x for x in items if x not in ranked]
-    # unique by title
-    seen: set[str] = set()
-    uniq = []
-    for it in items:
-        if it["title"] in seen:
-            continue
-        seen.add(it["title"])
-        uniq.append(it)
-    return uniq[:18]
-
-
-def size_spec(direction: str, level: str) -> str:
-    if direction == "EN-ZH":
-        return "150-220 English words" if level == "B2" else "250-350 English words"
-    return "220-350 汉字" if level == "B2" else "350-500 汉字"
-
-
-async def make_passage(req: StartRequest) -> dict[str, Any]:
-    direction = req.direction if req.direction in ("EN-ZH", "ZH-EN") else default_direction()
-    topic = req.topic if req.topic in TOPICS else "AUTO"
-    level = req.level if req.level in ("B2", "C1") else "C1"
-
-    if req.custom_text.strip():
-        text = req.custom_text.strip()
-        paras = split_practice_chunks(text, direction)
-        detected = "EN-ZH" if count_en_words(text) >= count_zh_chars(text) else "ZH-EN"
-        return {
-            "direction": detected if req.direction == "auto" else direction,
-            "topic": topic,
-            "level": level,
-            "title": "自带材料",
-            "outlet": "用户提供",
-            "date": today().isoformat(),
-            "url": "",
-            "note": "用户自带材料",
-            "paragraphs": paras,
-            "word_or_char_count": count_en_words(text) if (req.direction if req.direction != "auto" else detected) == "EN-ZH" else count_zh_chars(text),
-        }
-
-    headlines = await harvest_headlines(direction, topic)
-    headlines = [h for h in headlines if h["title"] not in req.exclude]
-    if not headlines:
-        raise HTTPException(502, "近两周时文 RSS 暂不可用，请粘贴自带材料，或稍后重试。")
-
-    user = {
-        "task": "根据候选标题写一篇视译练习原文",
-        "direction": direction,
-        "topic": TOPICS[topic],
-        "length": size_spec(direction, level),
-        "candidates": headlines[:10],
-        "rules": [
-            "只选一条候选，基于其标题与摘要改写成适合视译的连贯原文",
-            "不要编造精确数字、人名、职衔、日期；不确定就写得更笼统并在 note 里写来源待核实",
-            "只按自然段分段，不要划分意群，不要给译文",
-            "返回 JSON：title, outlet, date, url, note, paragraphs(数组), why_chosen",
-        ],
-    }
-    raw = await chat(
-        [
-            {"role": "system", "content": PROMPT + "\n只返回 JSON。"},
-            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-        ],
-        temperature=0.5,
-    )
-    data = parse_json(raw)
-    paragraphs = data.get("paragraphs") or []
-    if isinstance(paragraphs, str):
-        paragraphs = split_paragraphs(paragraphs)
-    paragraphs = split_practice_chunks("\n".join(paragraphs), direction)
-    text = "\n\n".join(paragraphs)
-    count = count_en_words(text) if direction == "EN-ZH" else count_zh_chars(text)
-    return {
-        "direction": direction,
-        "topic": topic,
-        "level": level,
-        "title": data.get("title") or headlines[0]["title"],
-        "outlet": data.get("outlet") or headlines[0]["outlet"],
-        "date": data.get("date") or headlines[0].get("date") or "",
-        "url": data.get("url") or headlines[0].get("url") or "",
-        "note": data.get("note") or "来源待核实",
-        "paragraphs": paragraphs,
-        "word_or_char_count": count,
-        "why_chosen": data.get("why_chosen") or "",
-    }
-
-
-def load_json_list(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
-        return []
-
-
-def save_json_list(path: Path, data: list[dict[str, Any]], limit: int = 200) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data[-limit:], ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-MAGAZINE_FIELDS = ["主题领域", "刊物风格", "具体场景", "人物角色", "时间地点", "核心论点", "论据类型", "关键词与专有名词", "句式模板", "提问角度", "难度等级", "文体", "争议点类型", "数据锚点"]
-MAGAZINE_STYLES = ["The Economist 式分析", "The Atlantic 式长评", "National Geographic 式纪实", "Wired 式科技评论", "New Yorker 式人物特写"]
-MAGAZINE_TOPICS = ["科技", "教育", "环保", "医疗", "经济", "文化", "政治", "社会", "心理", "历史", "艺术", "体育"]
-MAGAZINE_SCENES = ["实验室", "议会", "灾区", "创业公司", "边境小镇", "博物馆", "法庭", "工厂", "校园", "医院"]
-MAGAZINE_DISPUTES = ["经济 vs 环保", "效率 vs 公平", "传统 vs 现代", "个人 vs 集体", "自由 vs 安全"]
-
-
-def magazine_history_signature(article: dict[str, Any]) -> dict[str, Any]:
-    elements = article.get("elements") or {}
-    return {
-        "title_keywords": set(re.findall(r"[A-Za-z]{4,}|[\u4e00-\u9fff]{2,}", article.get("title", "").lower())),
-        "conflict": str(elements.get("争议点类型", "")),
-        "style": str(elements.get("刊物风格", "")),
-        "anchor": str(elements.get("时间地点", "")) + "|" + str(elements.get("数据锚点", "")),
-        "proper_nouns": set(str(item).lower() for item in elements.get("关键词与专有名词", [])),
-    }
-
-
-def magazine_duplicate_report(candidate: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
-    current = magazine_history_signature(candidate)
-    overlaps = []
-    recent = history[-20:]
-    for old in recent:
-        previous = magazine_history_signature(old)
-        same = []
-        if current["title_keywords"] & previous["title_keywords"]:
-            same.append("标题关键词")
-        if current["conflict"] and current["conflict"] == previous["conflict"]:
-            same.append("争议点类型")
-        if current["style"] and current["style"] == previous["style"]:
-            same.append("刊物风格")
-        if current["anchor"] and current["anchor"] == previous["anchor"]:
-            same.append("事实锚点")
-        if current["proper_nouns"] & previous["proper_nouns"]:
-            same.append("专有名词")
-        if same:
-            overlaps.append({"article_id": old.get("id", ""), "dimensions": same})
-    previous_styles = [str((item.get("elements") or {}).get("刊物风格", "")) for item in history[-1:]]
-    previous_conflicts = [str((item.get("elements") or {}).get("争议点类型", "")) for item in history[-2:]]
-    return {"recent_count": len(recent), "overlaps": overlaps, "same_dimensions": sorted({dimension for item in overlaps for dimension in item["dimensions"]}), "passed": not overlaps, "recent_style": previous_styles, "recent_conflicts": previous_conflicts}
-
-
-async def generate_magazine_article(req: MagazineGenerateRequest) -> dict[str, Any]:
-    history = load_json_list(MAGAZINE_ARTICLE_STORE)
-    style = req.style if req.style in MAGAZINE_STYLES else MAGAZINE_STYLES[len(history) % len(MAGAZINE_STYLES)]
-    topic = TOPICS.get(req.topic, "随机热点") if req.topic in TOPICS else req.topic
-    used = [{"title": item.get("title", ""), "elements": item.get("elements", {})} for item in history[-20:]]
-    payload = {"task": "生成一篇英语刊物风格视译文章及配套题目", "direction": req.direction, "topic": topic, "level": req.level, "style": style, "used_history": used, "requirements": {"article": {"title": "简短有力，可带副标题", "standfirst": "一句话提出核心冲突或悬念", "body": "3-6段，每段80-150英文词", "kicker": "克制收束或留悬念", "no_textbook": True, "fact_anchor": "具体年份、地点、机构或数据", "controversy": "必须有对立观点", "scene": "必须有具体场景"}, "elements": MAGAZINE_FIELDS, "questions": "至少5题，覆盖至少4种题型；每题含type、difficulty、paragraph、prompt、answer、scoring_points、explanation；禁止全是选择题"}}
-    last_error = ""
-    for attempt in range(10):
-        try:
-            raw = await chat([{"role": "system", "content": PROMPT + "\n你是英语刊物编辑和视译题库主编。只返回 JSON。"}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}], temperature=0.75)
-            data = parse_json(raw)
-            body = data.get("body") or data.get("paragraphs") or []
-            if isinstance(body, str): body = split_paragraphs(body)
-            article = {"id": uuid4().hex, "created_at": datetime.now(TZ).isoformat(timespec="seconds"), "direction": req.direction, "topic": topic, "level": req.level, "style": style, "title": str(data.get("title") or ""), "standfirst": str(data.get("standfirst") or data.get("lede") or ""), "body": [str(item).strip() for item in body if str(item).strip()], "kicker": str(data.get("kicker") or ""), "reading_time": data.get("reading_time") or "", "word_count": count_en_words(" ".join(body)), "elements": data.get("elements") or {}, "questions": data.get("questions") or []}
-            article["elements"] = {field: article["elements"].get(field, "") for field in MAGAZINE_FIELDS}
-            report = magazine_duplicate_report(article, history)
-            valid_questions = len(article["questions"]) >= 5 and len({str(item.get("type", "")) for item in article["questions"]}) >= 4
-            if len(article["body"]) >= 3 and article["title"] and article["standfirst"] and article["kicker"] and valid_questions and report["passed"]:
-                article["self_check"] = {"attempts": attempt + 1, "article_elements": article["elements"], "history_overlap": report, "question_overlap": {"passed": True, "checked_count": len(article["questions"])}, "conclusion": "确认无重复"}
-                articles = history + [article]
-                save_json_list(MAGAZINE_ARTICLE_STORE, articles)
-                questions = load_json_list(MAGAZINE_QUESTION_STORE)
-                questions.append({"article_id": article["id"], "created_at": article["created_at"], "questions": article["questions"]})
-                save_json_list(MAGAZINE_QUESTION_STORE, questions)
-                return article
-            last_error = "文章或题目未通过结构/去重校验"
-        except Exception as exc:
-            last_error = str(exc)
-    raise HTTPException(502, f"刊物文章生成失败：{last_error}")
 
 def split_practice_chunks(text: str, direction: str) -> list[str]:
     """Split source material at natural punctuation without changing its wording."""
@@ -580,11 +247,6 @@ def split_practice_chunks(text: str, direction: str) -> list[str]:
     return chunks
 
 
-def short_sentences(text: str) -> list[str]:
-    direction = "EN-ZH" if count_en_words(text) >= count_zh_chars(text) else "ZH-EN"
-    return split_practice_chunks(text, direction)
-
-
 def phrase_chunks(text: str, direction: str) -> list[str]:
     separators = r"([,;:，；：]|\b(?:and|but|while|because|although|when|if|that|which|who)\b)" if direction == "EN-ZH" else r"([，；：、]|因为|但是|不过|虽然|如果|当|并且|同时|因此)"
     parts = [part.strip(" ,;:，；：") for part in re.split(separators, text) if part and not re.fullmatch(separators, part)]
@@ -593,62 +255,6 @@ def phrase_chunks(text: str, direction: str) -> list[str]:
 
 def slash_chunks(text: str, direction: str) -> str:
     return " / ".join(phrase_chunks(text, direction))
-
-
-def term_hints(source: str, answer: str, direction: str) -> list[dict[str, str]]:
-    hints: list[dict[str, str]] = []
-    numbers = re.findall(r"\b\d+(?:[.,]\d+)?%?\b|[一二三四五六七八九十]+", source)
-    for number in numbers[:2]:
-        hints.append({"source": number, "current": number if number in answer else "未出现", "suggestion": number, "reason": "原句中的数字必须完整保留，并先明确数字对应的时间、比例或数量对象。"})
-    if direction == "EN-ZH":
-        dictionary = {"public transport": "公共交通", "consumer demand": "消费需求", "supply chains": "供应链", "energy use": "能源消耗", "teacher training": "教师培训", "environmental proposal": "环境方案", "appointment system": "预约系统", "water-saving equipment": "节水设备", "opening hours": "开放时间", "delivery vehicles": "配送车辆", "flood-prone streets": "易积水街道"}
-        lowered = source.lower()
-        for english, chinese in dictionary.items():
-            if english in lowered:
-                current = "未译出"
-                answer_match = re.search(r"[^，。；！？.!?]*" + re.escape(chinese) + r"[^，。；！？.!?]*", answer)
-                if answer_match:
-                    current = answer_match.group(0).strip()
-                hints.append({"source": english, "current": current, "suggestion": chinese, "reason": f"“{english}”在本句中表示固定概念，推荐整体译为“{chinese}”，逐词拆开会丢失专业搭配关系。"})
-
-    else:
-        dictionary = {
-            "市政府": "the city government",
-            "启动试点计划": "launch a pilot programme",
-            "试点计划": "pilot programme",
-            "高峰时段": "peak hours",
-            "公共交通": "public transport",
-            "便利性": "accessibility",
-            "公共交通的便利性": "the accessibility of public transport",
-            "有关部门": "the relevant authorities",
-            "客流变化": "changes in passenger flow",
-            "调整班次": "adjust service frequency",
-            "换乘站": "transfer stations",
-            "引导人员": "guidance staff",
-            "实时信息提示": "real-time information updates",
-            "通勤者": "commuters",
-            "能源消耗": "energy consumption",
-            "环境方案": "environmental proposal",
-            "消费需求": "consumer demand",
-            "供应链": "supply chains",
-            "融资成本": "borrowing costs",
-            "线上预约系统": "online appointment system",
-            "节水设备": "water-saving equipment",
-            "开放时间": "opening hours",
-            "配送车辆": "delivery vehicles",
-            "易积水街道": "flood-prone streets",
-        }
-        for chinese, english in sorted(dictionary.items(), key=lambda item: len(item[0]), reverse=True):
-            if chinese in source:
-                current = english if re.search(rf"\b{re.escape(english)}\b", answer, re.I) else "未译出"
-                hints.append({"source": chinese, "current": current, "suggestion": english, "reason": f"“{chinese}”是完整术语或固定搭配，建议整体译为“{english}”，再放入完整英文句式。"})
-    unique: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for hint in hints:
-        if hint["source"] not in seen:
-            seen.add(hint["source"])
-            unique.append(hint)
-    return unique[:4]
 
 
 def recent_question_keys() -> set[str]:
@@ -777,12 +383,68 @@ def fallback_questions(direction: str, topic: str) -> list[str]:
     return (english + scenarios_en + extra_en) if direction == "EN-ZH" else (chinese + scenarios_zh + extra_zh)
 
 
+async def harvest_headlines(direction: str, topic: str) -> list[dict[str, str]]:
+    feeds = EN_FEEDS if direction == "EN-ZH" else ZH_FEEDS
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+
+    async def fetch_feed(client: httpx.AsyncClient, outlet: str, url: str) -> list[dict[str, str]]:
+        try:
+            response = await client.get(url, headers={"User-Agent": "shiyi-coach/1.0"})
+            parsed = feedparser.parse(response.content)
+        except Exception:
+            return []
+        entries: list[dict[str, str]] = []
+        for entry in parsed.entries[:12]:
+            published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc) if getattr(entry, "published_parsed", None) else None
+            if published and published < cutoff:
+                continue
+            title = (entry.get("title") or "").strip()
+            if not title:
+                continue
+            entries.append({
+                "outlet": outlet,
+                "title": title,
+                "summary": re.sub(r"<[^>]+>", "", entry.get("summary") or entry.get("description") or "")[:600],
+                "url": entry.get("link") or "",
+                "date": published.date().isoformat() if published else "",
+            })
+        return entries
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0), follow_redirects=True) as client:
+        groups = await asyncio.gather(*(fetch_feed(client, outlet, url) for outlet, url in feeds))
+    items = [item for group in groups for item in group]
+    topic_hint = TOPICS.get(topic, "")
+    if topic not in ("AUTO", "") and topic_hint:
+        ranked = [x for x in items if topic_hint[:2] in x["title"] or any(
+            k in x["title"] + x["summary"]
+            for k in {
+                "POL": ["选举", "外交", "总统", "election", "diplomat", "president", "NATO", "UN"],
+                "ECO": ["经济", "通胀", "利率", "GDP", "inflation", "rate", "market", "bank"],
+                "TECH": ["科技", "芯片", "AI", "人工智能", "chip", "tech", "software"],
+                "SOC": ["社会", "移民", "住房", "housing", "migration", "strike"],
+                "ENV": ["气候", "碳", "气候", "climate", "carbon", "flood"],
+                "EDU": ["教育", "卫生", "医院", "school", "health", "hospital"],
+                "BIZ": ["公司", "并购", "财报", "company", "merger", "earnings"],
+                "CUL": ["体育", "电影", "文化", "sport", "film", "olympic"],
+            }.get(topic, [])
+        )]
+        if ranked:
+            items = ranked + [x for x in items if x not in ranked]
+    # unique by title
+    seen: set[str] = set()
+    uniq = []
+    for it in items:
+        if it["title"] in seen:
+            continue
+        seen.add(it["title"])
+        uniq.append(it)
+    return uniq[:18]
+
+
 async def make_ai_question_set(direction: str, topic: str, level: str) -> tuple[list[dict[str, Any]], str]:
     if not API_KEY or API_KEY.startswith("sk-your"):
         raise RuntimeError("练习服务暂不可用")
     headlines = await harvest_headlines(direction, topic)
-    if not headlines:
-        raise RuntimeError("RSS 暂无可用题材")
     payload = {
         "task": "生成 5 道独立的短句视译练习题",
         "direction": direction,
@@ -795,7 +457,7 @@ async def make_ai_question_set(direction: str, topic: str, level: str) -> tuple[
             "题目语言必须与 direction 的源语言一致：EN-ZH 为英文，ZH-EN 为中文",
             "每道中文题控制在约100-200个中文字符；英文题控制在约35-85个单词",
             "覆盖数字、逻辑、术语、长句拆分等不同训练点",
-            "不得编造精确来源事实；参考候选的主题改写为自洽训练句",
+            "不得编造精确来源事实；若有候选，参考其主题改写为自洽训练句；若候选为空，围绕 topic 与 level 自行生成自洽训练句",
             "返回 JSON：{questions:[字符串,字符串,字符串,字符串,字符串]}",
         ],
     }
@@ -815,7 +477,7 @@ async def make_ai_question_set(direction: str, topic: str, level: str) -> tuple[
         normalized.extend(split_practice_chunks(item, direction))
     unique = unique_question_texts(normalized, direction, topic, fill_with_fallback=True, exclude=recent_question_keys())
     return [
-        {"id": f"q-{index + 1}", "order": index + 1, "source": item, "term_hints": term_hints(item, "", direction), "answer": "", "tone": "待标记", "rhythm": "待标记", "audio_meta": {}}
+        {"id": f"q-{index + 1}", "order": index + 1, "source": item, "answer": "", "tone": "待标记", "rhythm": "待标记", "audio_meta": {}}
         for index, item in enumerate(unique)
     ], "系统练习题组"
 
@@ -843,7 +505,6 @@ def make_question_set(direction: str, topic: str, level: str, custom_text: str) 
                 "id": f"q-{index + 1}",
                 "order": index + 1,
                 "source": sentence,
-                "term_hints": term_hints(sentence, "", direction),
                 "answer": "",
                 "tone": "待标记",
                 "rhythm": "待标记",
@@ -861,19 +522,6 @@ def score_band(score: int) -> str:
     if score >= 60:
         return "合格"
     return "待提高"
-
-
-def normalize_suggestion(raw: Any, user_render: str, source_points: str, direction: str) -> dict[str, str]:
-    fallback = concrete_suggestion(user_render or source_points, source_points, direction, 1.0, 0)
-    if not isinstance(raw, dict):
-        return fallback
-    return {
-        "source_quote": str(raw.get("source_quote") or fallback["source_quote"]),
-        "diagnosis": str(raw.get("diagnosis") or fallback["diagnosis"]),
-        "action": str(raw.get("action") or fallback["action"]),
-        "example": str(raw.get("example") or fallback["example"]),
-        "reason": str(raw.get("reason") or fallback["reason"]),
-    }
 
 
 def concrete_suggestion(answer: str, source: str, direction: str, coverage: float, pause_count: int) -> dict[str, str]:
@@ -988,7 +636,6 @@ def sentence_feedback(question: dict[str, Any], direction: str, order: int) -> d
         second = round(float(first.get("start_ms", 0)) / 1000, 1)
         duration = round(float(first.get("duration_ms", 0)) / 1000, 1)
         pause_note = f"本句在第 {second} 秒处停顿约 {duration} 秒；请将该停顿对照“{answer_breaks}”检查，若不在斜杠边界，缩短到 0.3 秒以内。"
-    terms = term_hints(source, answer, direction)
     source_units = count_en_words(source) if direction == "EN-ZH" else count_zh_chars(source)
     answer_units = count_zh_chars(answer) if direction == "EN-ZH" else count_en_words(answer)
     coverage = min(1, answer_units / max(1, source_units * (1.15 if direction == "EN-ZH" else 0.45)))
@@ -1013,7 +660,7 @@ def sentence_feedback(question: dict[str, Any], direction: str, order: int) -> d
         "teaching": teaching_steps,
         "structure": {"main_clause": f"主干：{first_part}", "supporting_information": f"补充信息：{''.join(answer_parts[1:]) if len(answer_parts) > 1 else '本句未形成独立补充意群'}", "evidence": f"你的作答原句：“{answer}”"},        "manual_mark": {"tone": question.get("tone", "待标记"), "rhythm": question.get("rhythm", "待标记"), "scores": scores},
         "pause_rhythm": pause_note,
-        "wording": {"score": scores["word_precision"]["score"], "issue": scores["word_precision"]["deduction"], "sentence_note": scores["sentence_variety"]["deduction"], "terms": terms},
+        "wording": {"score": scores["word_precision"]["score"], "issue": scores["word_precision"]["deduction"], "sentence_note": scores["sentence_variety"]["deduction"]},
         "content_accuracy": {"score": round(coverage * 100), "comment": "已按作答长度和信息单元估算覆盖度。"},
         "expression_fluency": {"score": scores["spoken_naturalness"]["score"], "comment": scores["spoken_naturalness"]["deduction"]},
         "tone": {"score": scores["spoken_naturalness"]["score"], "comment": f"手动标记：{question.get('tone', '待标记')}。"},
@@ -1027,22 +674,187 @@ def rule_question_feedback(question: dict[str, Any], direction: str, order: int 
     return sentence_feedback(question, direction, order)
 
 
-def review_practice_questions(req: PracticeReviewRequest) -> dict[str, Any]:
+DIMENSION_KEYS = ("grammar_accuracy", "word_precision", "sentence_variety", "logic_coherence", "spoken_naturalness")
+METRIC_KEYS = ("content_accuracy", "expression_fluency", "tone", "rhythm", "wording_structure")
+
+
+def score_value(value: Any, default: int) -> int:
+    try:
+        return max(0, min(100, int(round(float(value)))))
+    except (TypeError, ValueError):
+        return max(0, min(100, int(default)))
+
+
+def text_value(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def merge_ai_feedback(baseline: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """Overlay AI-written feedback onto the rule baseline so every frontend field stays present."""
+    if not isinstance(data, dict):
+        return baseline
+    result = baseline
+    for key in ("diagnosis", "reason", "pause_rhythm"):
+        text = text_value(data.get(key))
+        if text:
+            result[key] = text
+    structure = data.get("structure")
+    if isinstance(structure, dict):
+        for key in ("main_clause", "supporting_information", "evidence"):
+            text = text_value(structure.get(key))
+            if text:
+                result["structure"][key] = text
+    example = data.get("example")
+    if isinstance(example, dict):
+        for key in ("revised", "changes"):
+            text = text_value(example.get(key))
+            if text:
+                result["example"][key] = text
+    teaching = data.get("teaching")
+    if isinstance(teaching, list):
+        steps = [
+            {"title": text_value(item.get("title")), "content": text_value(item.get("content"))}
+            for item in teaching
+            if isinstance(item, dict) and text_value(item.get("title")) and text_value(item.get("content"))
+        ]
+        if len(steps) >= 3:
+            result["teaching"] = steps[:6]
+    wording = data.get("wording")
+    if isinstance(wording, dict):
+        for key in ("issue", "sentence_note"):
+            text = text_value(wording.get(key))
+            if text:
+                result["wording"][key] = text
+    scores = data.get("scores")
+    if isinstance(scores, dict):
+        for key in DIMENSION_KEYS:
+            item = scores.get(key)
+            if isinstance(item, dict):
+                value = score_value(item.get("score"), result["manual_mark"]["scores"][key]["score"])
+                comment = text_value(item.get("comment"))
+            else:
+                value = score_value(item, result["manual_mark"]["scores"][key]["score"])
+                comment = ""
+            result["manual_mark"]["scores"][key]["score"] = value
+            if comment:
+                result["manual_mark"]["scores"][key]["deduction"] = comment
+    metrics = data.get("metrics")
+    if isinstance(metrics, dict):
+        for key in METRIC_KEYS:
+            item = metrics.get(key)
+            if isinstance(item, dict):
+                result[key] = {
+                    "score": score_value(item.get("score"), result.get(key, {}).get("score", 0)),
+                    "comment": text_value(item.get("comment")) or result.get(key, {}).get("comment", ""),
+                }
+    dim_values = [item["score"] for item in result["manual_mark"]["scores"].values()]
+    overall = score_value(data.get("score"), round(sum(dim_values) / len(dim_values)))
+    result["score"] = overall
+    result["label"] = score_band(overall)
+    result["wording"]["score"] = result["manual_mark"]["scores"]["word_precision"]["score"]
+    result["suggestion"] = {
+        "source_quote": result["source_quote"],
+        "diagnosis": result["diagnosis"],
+        "action": result["example"]["changes"],
+        "example": f"原句：{result['example']['original']}\n改后句：{result['example']['revised']}",
+        "reason": result["reason"],
+    }
+    return result
+
+
+async def ai_sentence_feedback(question: dict[str, Any], direction: str, order: int) -> dict[str, Any]:
+    baseline = sentence_feedback(question, direction, order)
+    if not API_KEY or API_KEY.startswith("sk-your"):
+        return baseline
+    payload = {
+        "task": "对一条视译作答做逐句深度点评，严格按给定模板返回 JSON",
+        "direction": direction,
+        "direction_note": "EN-ZH 为英译中；ZH-EN 为中译英",
+        "order": order,
+        "source": str(question.get("source") or "").strip(),
+        "answer": str(question.get("answer") or "").strip(),
+        "manual_tone": question.get("tone", "待标记"),
+        "manual_rhythm": question.get("rhythm", "待标记"),
+        "audio_meta": question.get("audio_meta") or {},
+        "rule_baseline": {
+            "diagnosis": baseline["diagnosis"],
+            "source_breakdown": baseline["breakdown"]["after"],
+            "answer_breakdown": baseline["breakdown"]["answer_after"],
+            "revised_example": baseline["example"]["revised"],
+            "changes": baseline["example"]["changes"],
+            "reason": baseline["reason"],
+            "pause_rhythm": baseline["pause_rhythm"],
+            "scores": {key: item["score"] for key, item in baseline["manual_mark"]["scores"].items()},
+        },
+        "template": {
+            "diagnosis": "问题类型 + 原文证据 + 作答证据 + 对听者的具体影响；必须引用具体词句，禁止空泛评价",
+            "structure": {"main_clause": "主干", "supporting_information": "补充信息", "evidence": "逐词对照证据"},
+            "example": {"revised": "目标语改后句：EN-ZH 输出中文，ZH-EN 输出英文且语法正确", "changes": "1. ...\n2. ...\n3. ..."},
+            "reason": "说明改动如何提升信息完整性、传递流畅度或目标语言质量，并对应 Han (2015)",
+            "teaching": [{"title": "步骤名", "content": "可执行的练习动作"}],
+            "pause_rhythm": "结合停顿数据给出可执行建议",
+            "wording": {"issue": "用词或术语问题", "sentence_note": "句式与信息分层问题"},
+            "scores": {
+                "grammar_accuracy": {"score": 0, "comment": "语法准确性依据"},
+                "word_precision": {"score": 0, "comment": "用词精准度依据"},
+                "sentence_variety": {"score": 0, "comment": "句式多样性依据"},
+                "logic_coherence": {"score": 0, "comment": "逻辑连贯度依据"},
+                "spoken_naturalness": {"score": 0, "comment": "口语自然度依据"},
+            },
+            "metrics": {
+                "content_accuracy": {"score": 0, "comment": "信息完整性依据"},
+                "expression_fluency": {"score": 0, "comment": "传递流畅度依据"},
+                "tone": {"score": 0, "comment": "语气判断"},
+                "rhythm": {"score": 0, "comment": "节奏判断"},
+                "wording_structure": {"score": 0, "comment": "目标语言质量依据"},
+            },
+            "score": 0,
+        },
+        "rules": [
+            "逐词对照原文与作答，先给证据再定档；不得编造原文没有的事实、数字或来源。",
+            "同一错误只扣一个维度：数字、专名、逻辑关系错误归信息完整性；卡顿、重复、停顿归传递流畅度；语法、搭配、术语归目标语言质量。",
+            "参考 rule_baseline 的诊断方向，但必须纠正、扩展和深化，不能照抄。",
+            "teaching 至少 5 步，每步给出可执行动作。",
+            "scores 与 metrics 均为 0-100 的整数，且必须与诊断一致。",
+            "只返回 JSON，不要 Markdown 代码块。",
+        ],
+    }
+    try:
+        raw = await chat(
+            [
+                {"role": "system", "content": PROMPT + "\n你是资深视译考官与口译教练。严格按 Han (2015) 量表做证据化点评，只返回 JSON。"},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.3,
+        )
+        return merge_ai_feedback(baseline, parse_json(raw))
+    except Exception:
+        return baseline
+
+
+async def review_practice_questions(req: PracticeReviewRequest) -> dict[str, Any]:
     questions = req.questions[:5]
     if len(questions) != 5:
         raise HTTPException(422, "请完成一组 5 道题后再提交统一点评。")
-    reviews = []
-    for index, question in enumerate(questions):
+    for question in questions:
         if not str(question.get("source") or "").strip() or not str(question.get("answer") or "").strip():
             raise HTTPException(422, "请先完成全部 5 道题的作答。")
-        reviews.append({"id": question.get("id"), "feedback": rule_question_feedback(question, req.direction, index + 1)})
+
+    async def build(index: int, question: dict[str, Any]) -> dict[str, Any]:
+        try:
+            feedback = await asyncio.wait_for(ai_sentence_feedback(question, req.direction, index + 1), timeout=75)
+        except (Exception, asyncio.TimeoutError):
+            feedback = sentence_feedback(question, req.direction, index + 1)
+        return {"id": question.get("id"), "feedback": feedback}
+
+    reviews = await asyncio.gather(*(build(index, question) for index, question in enumerate(questions)))
     average = round(sum(item["feedback"]["score"] for item in reviews) / len(reviews))
     return {
         "mode": "practice_review",
         "session_key": "",
         "overall_score": average,
         "overall_label": score_band(average),
-        "summary": "已完成统一点评。请根据每题的原文定位、问题诊断、具体改法和示例逐项调整。",
+        "summary": "已完成 AI 逐句点评。每句都按“原文定位—问题诊断—具体改法—原因说明—复述步骤”给出证据化分析，请逐项练习。",
         "questions": reviews,
     }
 
@@ -1074,33 +886,6 @@ def record_preview(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def append_profile(session: dict[str, Any], scores: dict[str, Any], summary: str) -> None:
-    PROFILE.parent.mkdir(parents=True, exist_ok=True)
-    if not PROFILE.exists():
-        PROFILE.write_text("# 视译训练档案\n\n## 训练记录\n", encoding="utf-8")
-    body = PROFILE.read_text(encoding="utf-8")
-    line = (
-        f"- {today().isoformat()} | {session['direction']} | {session.get('topic','AUTO')} | "
-        f"{session.get('outlet','')}《{session.get('title','')}》 | "
-        f"完整{scores['completeness']['score']}/流畅{scores['fluency']['score']}/语言{scores['language']['score']} | "
-        f"总分{scores['total']} {scores['grade']} | {summary.replace(chr(10), ' / ')}"
-    )
-    body = body.replace("（尚无记录）", "")
-    body = re.sub(r"- 建立日期：待开始", f"- 建立日期：{today().isoformat()}", body, count=1)
-    if "## 训练记录" in body:
-        body = body.replace("## 训练记录", "## 训练记录\n" + line, 1)
-    else:
-        body += "\n## 训练记录\n" + line + "\n"
-    stamp = session.get("title") or ""
-    body = re.sub(
-        r"- 最近材料（防重复）：.*",
-        lambda m: (m.group(0).rstrip("。") + f"；{stamp}")[:400],
-        body,
-        count=1,
-    )
-    PROFILE.write_text(body, encoding="utf-8")
-
-
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
@@ -1117,26 +902,6 @@ def meta() -> dict[str, Any]:
         "has_key": bool(API_KEY and not API_KEY.startswith("sk-your")),
         "asr_ready": bool(DASHSCOPE_API_KEY and not DASHSCOPE_API_KEY.startswith("sk-your")),
     }
-
-
-@app.post("/api/magazine/generate")
-async def magazine_generate(req: MagazineGenerateRequest) -> dict[str, Any]:
-    return await generate_magazine_article(req)
-
-
-@app.get("/api/magazine/history")
-def magazine_history() -> dict[str, Any]:
-    articles = load_json_list(MAGAZINE_ARTICLE_STORE)
-    return {"articles": [{"id": item.get("id"), "title": item.get("title"), "standfirst": item.get("standfirst"), "created_at": item.get("created_at"), "word_count": item.get("word_count"), "elements": item.get("elements", {})} for item in articles[-20:]]}
-
-
-@app.get("/api/magazine/{article_id}")
-def magazine_detail(article_id: str) -> dict[str, Any]:
-    article = next((item for item in load_json_list(MAGAZINE_ARTICLE_STORE) if item.get("id") == article_id), None)
-    if not article:
-        raise HTTPException(404, "未找到刊物文章。")
-    return article
-
 
 
 @app.post("/api/practice/transcribe")
@@ -1171,7 +936,7 @@ async def practice_start(req: PracticeStartRequest) -> dict[str, Any]:
 
 @app.post("/api/practice/review")
 async def practice_review(req: PracticeReviewRequest) -> dict[str, Any]:
-    return review_practice_questions(req)
+    return await review_practice_questions(req)
 
 
 def apply_manual_scores(feedback: dict[str, Any]) -> dict[str, Any]:
@@ -1306,8 +1071,137 @@ def build_focus_plan(weakest: dict[str, Any]) -> dict[str, Any]:
     return {"name": weakest["name"], "days": 7, "material": material, "steps": steps, "metric": metric, "advice": f"未来7天只针对{weakest['name']}。{material}。{steps}。量化标准：{metric}。"}
 
 
+def merge_ai_review(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return base
+    for key in ("conclusion", "evolution"):
+        text = text_value(data.get(key))
+        if text:
+            base[key] = text
+    plan = data.get("focus_plan")
+    if isinstance(plan, dict):
+        for key in ("name", "material", "steps", "metric", "advice"):
+            text = text_value(plan.get(key))
+            if text:
+                base["focus_plan"][key] = text
+        days = plan.get("days")
+        if isinstance(days, (int, float)):
+            base["focus_plan"]["days"] = max(1, min(30, int(days)))
+    weaknesses = data.get("weaknesses")
+    if isinstance(weaknesses, list):
+        by_name = {item.get("name"): item for item in base.get("weaknesses", [])}
+        for item in weaknesses:
+            if not isinstance(item, dict):
+                continue
+            target = by_name.get(text_value(item.get("name")))
+            if not target:
+                continue
+            diagnosis = text_value(item.get("diagnosis"))
+            if diagnosis:
+                target["diagnosis"] = diagnosis
+            cases = item.get("cases")
+            if isinstance(cases, list):
+                cleaned = [
+                    {
+                        "index": text_value(case.get("index")),
+                        "original_transcript": text_value(case.get("original_transcript")),
+                        "source": text_value(case.get("source")),
+                        "problem": text_value(case.get("problem")),
+                        "reference": text_value(case.get("reference")),
+                        "reason": text_value(case.get("reason")),
+                    }
+                    for case in cases
+                    if isinstance(case, dict) and text_value(case.get("index"))
+                ]
+                if cleaned:
+                    target["cases"] = cleaned[:4]
+    errors = data.get("top_errors")
+    if isinstance(errors, list):
+        cleaned_errors = [
+            {
+                "index": text_value(item.get("index")),
+                "source": text_value(item.get("source")),
+                "answer": text_value(item.get("answer")),
+                "problem": text_value(item.get("problem")),
+            }
+            for item in errors
+            if isinstance(item, dict) and text_value(item.get("index"))
+        ]
+        if cleaned_errors:
+            base["top_errors"] = cleaned_errors[:5]
+    return base
+
+
+async def ai_professional_review(
+    records: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    dimensions: list[dict[str, Any]],
+    overall: int,
+    previous_weakness: str,
+    base_result: dict[str, Any],
+) -> dict[str, Any]:
+    if not API_KEY or API_KEY.startswith("sk-your"):
+        return base_result
+    compact = [
+        {
+            "index": item["index"],
+            "source": item["source"][:220],
+            "answer": item["answer"][:220],
+            "diagnosis": item["diagnosis"][:180],
+            "revised": item["revised"][:180],
+            "reason": item["reason"][:180],
+            "pause": item["pause"][:140],
+            "scores": item["scores"],
+        }
+        for item in evidence[:12]
+    ]
+    payload = {
+        "task": "基于多次已保存练习生成专业复盘，严格按给定模板返回 JSON",
+        "framework": "Han (2015)：信息完整性、传递流畅度、目标语言质量；每个维度先列证据再定档。",
+        "stats": {
+            "count": len(records),
+            "overall_score": overall,
+            "score_trend": base_result["score_trend"],
+            "previous_weakness": previous_weakness,
+            "dimensions": [{"name": item["name"], "average": item["average"], "han": item["han"]} for item in dimensions],
+        },
+        "evidence": compact,
+        "template": {
+            "conclusion": "总判断：三维度分别处于哪一档、最低维度是什么、与上次复盘相比是否转移",
+            "evolution": "上次首要弱点与本次首要弱点的对比，以及下一步只练什么",
+            "weaknesses": [
+                {
+                    "name": "信息完整性 / 传递流畅度 / 目标语言质量（必须原样使用）",
+                    "diagnosis": "先引用证据，再说明扣分机制，最后给出该维度的训练动作",
+                    "cases": [{"index": "证据编号", "original_transcript": "原音转写", "source": "原文命题", "problem": "问题定位", "reference": "标准改法", "reason": "原因剖析"}],
+                }
+            ],
+            "focus_plan": {"name": "最低维度", "days": 7, "material": "选材", "steps": "可执行步骤", "metric": "量化标准", "advice": "7天执行建议"},
+            "top_errors": [{"index": "证据编号", "source": "原文", "answer": "原音转写", "problem": "问题"}],
+        },
+        "rules": [
+            "必须覆盖三个维度，且名称与 template 完全一致；顺序按统计中的平均分从低到高。",
+            "每个维度至少 2 条证据，证据必须来自提供的 evidence，不得编造。",
+            "同一错误只归入一个维度，避免重复扣分。",
+            "focus_plan 只能针对最低维度，给出 7 天内可执行的选材、步骤和量化标准。",
+            "只返回 JSON，不要 Markdown 代码块。",
+        ],
+    }
+    try:
+        raw = await chat(
+            [
+                {"role": "system", "content": PROMPT + "\n你是资深口译考官和专业复盘教练。严格按 Han (2015) 三个维度做证据化复盘，只返回 JSON。"},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.35,
+        )
+        return merge_ai_review(base_result, parse_json(raw))
+    except Exception:
+        return base_result
+
+
 @app.post("/api/practice/professional-review")
-def professional_review(req: ProfessionalReviewRequest) -> dict[str, Any]:
+async def professional_review(req: ProfessionalReviewRequest) -> dict[str, Any]:
     count = max(3, min(20, req.count))
     records = load_practice_records()[:count]
     if len(records) < 3:
@@ -1334,6 +1228,13 @@ def professional_review(req: ProfessionalReviewRequest) -> dict[str, Any]:
         "top_errors": top_errors,
         "examiner_prompt": "角色：资深口译考官。必须严格使用 Han (2015) 的信息完整性、传递流畅度、目标语言质量三档描述；每个维度先定档，再引用原音转写、原文、标准改法和原因，不得用笼统评价替代证据。",
     }
+    try:
+        result = await asyncio.wait_for(
+            ai_professional_review(records, evidence, dimensions, overall, previous_weakness, result),
+            timeout=85,
+        )
+    except (Exception, asyncio.TimeoutError):
+        pass
     if req.save:
         saved = load_professional_reviews()
         result["id"] = uuid4().hex
@@ -1554,136 +1455,6 @@ def practice_record_delete(record_id: str) -> dict[str, Any]:
 def practice_records_clear() -> dict[str, Any]:
     save_practice_records([])
     return {"message": "练习记录已清空。"}
-
-
-@app.post("/api/start")
-async def start(req: StartRequest) -> dict[str, Any]:
-    passage = await make_passage(req)
-    text = "\n\n".join(passage["paragraphs"])
-    lo, hi, cap = record_window(passage["direction"], text)
-    return {
-        **passage,
-        "preread_seconds": prereread_seconds(passage["direction"], text),
-        "record_ref_lo": lo,
-        "record_ref_hi": hi,
-        "record_cap": cap,
-    }
-
-
-@app.post("/api/score")
-async def score(req: ScoreRequest) -> dict[str, Any]:
-    metrics = objective_metrics(req.direction, req.transcript, req.duration_sec)
-    payload = {
-        "metrics_already_computed": metrics,
-        "fluency_estimated": req.fluency_estimated,
-        "direction": req.direction,
-        "source_paragraphs": req.paragraphs,
-        "transcript": req.transcript,
-        "duration_sec": req.duration_sec,
-        "return_schema": {
-            "completeness": {"score": "1-8 int", "band": "1-4 int", "reason": "中文"},
-            "fluency": {"score": "1-8 int", "band": "1-4 int", "reason": "中文"},
-            "language": {"score": "1-8 int", "band": "1-4 int", "reason": "中文"},
-            "paragraphs": [
-                {
-                    "source_points": "原文要点",
-                    "user_render": "用户译法",
-                    "issues": ["漏译/误译/数字/专名/语法/卡顿"],
-                    "suggestion": {"source_quote": "用户作答中的具体片段", "diagnosis": "具体问题", "action": "可执行改法", "example": "原句 → 改后句", "reason": "修改原因"},
-                    "asr_noise": False,
-                }
-            ],
-            "reference": "顺句驱动参考视译全文",
-            "reference_notes": "中译英时附中文处理思路，英译中可写关键处理",
-            "summary_lines": ["不超过5条中文短句"],
-            "main_problem": "最突出的一个问题",
-            "drill": "一个针对性练习动作",
-            "next_suggestion": "下次训练建议",
-        },
-        "instructions": "按 Han 2015 评分。必须返回 JSON。每条 suggestion 必须引用 user_render 中的具体片段，并以 source_quote、diagnosis、action、example、reason 五个字段返回；不得给出空泛建议。参考译文现在可以给出。",
-    }
-    raw = await chat(
-        [
-            {"role": "system", "content": PROMPT + "\n只返回 JSON。"},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        temperature=0.2,
-    )
-    judged = parse_json(raw)
-    for paragraph in judged.get("paragraphs") or []:
-        paragraph["suggestion"] = normalize_suggestion(
-            paragraph.get("suggestion"),
-            str(paragraph.get("user_render") or req.transcript),
-            str(paragraph.get("source_points") or ""),
-            req.direction,
-        )
-    for key in ("completeness", "fluency", "language"):
-        item = judged.get(key) or {}
-        item["score"] = int(max(1, min(8, int(item.get("score", 4)))))
-        item["band"] = int(max(1, min(4, int(item.get("band", (item["score"] + 1) // 2)))))
-        judged[key] = item
-    total = judged["completeness"]["score"] + judged["fluency"]["score"] + judged["language"]["score"]
-    judged["total"] = total
-    judged["grade"] = grade_for(total)
-    summary = " ".join(judged.get("summary_lines") or []) or judged.get("main_problem", "")
-    append_profile(
-        {
-            "direction": req.direction,
-            "topic": req.topic,
-            "title": req.source_title,
-            "outlet": req.source_outlet,
-        },
-        judged,
-        summary,
-    )
-    return {"metrics": metrics, "judgement": judged}
-
-
-@app.get("/api/profile")
-def profile() -> dict[str, str]:
-    if not PROFILE.exists():
-        return {"text": "尚无档案。"}
-    return {"text": PROFILE.read_text(encoding="utf-8")}
-
-
-@app.post("/api/summary")
-async def summary(req: SummaryRequest) -> dict[str, Any]:
-    text = PROFILE.read_text(encoding="utf-8") if PROFILE.exists() else "尚无档案"
-    raw = await chat(
-        [
-            {"role": "system", "content": PROMPT + "\n只返回 JSON。"},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": "阶段总结",
-                        "days": req.days,
-                        "profile_md": text,
-                        "return": {
-                            "title": "总结标题",
-                            "totals": {"en_zh": 0, "zh_en": 0, "sessions": 0},
-                            "score_trend": ["每次总分及升降"],
-                            "weakest": {"dimension": "", "examples": ["", ""]},
-                            "top_errors": ["高频错误 Top5"],
-                            "advice": ["下阶段建议"],
-                            "report_markdown": "完整 Markdown 报告",
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ],
-        temperature=0.3,
-    )
-    data = parse_json(raw)
-    saved = ""
-    if req.save:
-        REPORTS.mkdir(parents=True, exist_ok=True)
-        name = f"summary-{today().isoformat()}.md"
-        path = REPORTS / name
-        path.write_text(data.get("report_markdown") or json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        saved = str(path)
-    return {**data, "saved_path": saved}
 
 
 @app.get("/api/health")
